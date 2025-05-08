@@ -1,5 +1,7 @@
 # bfjit
 
+### syntax
+
 | Brainfuck | C         |
 |:---------:|:---------:|
 | >         | ptr++     |
@@ -11,8 +13,6 @@
 | [         | while(*ptr) {       |
 | ]         | }                   |
 
-
-
-- Reference
-[A nice blog for learning brainfuck](https://blog.csdn.net/nameofcsdn/article/details/110231730)
-[Thans to tsoding for the video](https://www.youtube.com/watch?v=mbFY3Rwv7XM)
+### Reference
+- [A nice blog for learning brainfuck](https://blog.csdn.net/nameofcsdn/article/details/110231730)
+- [Thans to tsoding for the video](https://www.youtube.com/watch?v=mbFY3Rwv7XM)
