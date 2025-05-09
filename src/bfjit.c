@@ -193,14 +193,15 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
     struct zd_dynb mem = {0};
     zd_dynb_resize(&mem, 1024);
     memset(mem.base, 0, mem.capacity);
-    char *dp = mem.base;    /* data pointer */
-    size_t pc = 0;          /* program counter */
-     
+    char *dp = mem.base;            /* data pointer */
+    size_t pc = 0;                  /* program counter */
+    struct zd_string code = {0};    /* for the assemble code */
+
     while (pc < insts->count) {
         struct instruction *inst = (struct instruction *) zd_dyna_get(insts, pc);
         switch (inst->opcode) {
         case OP_SHL: { /* dp -= inst->operand; */
-            struct zd_string code = {0};
+            code.length = 0;
             zd_string_appendm(&code, "\n\tsub QWORD [rdi], %zu", inst->operand); 
             zd_string_appendm(&code, "\n\tret");
 
@@ -216,7 +217,7 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
         } break;
 
         case OP_SHR: { /* dp += inst->operand; */
-            struct zd_string code = {0};
+            code.length = 0;
             zd_string_appendm(&code, "\n\tadd QWORD [rdi], %zu", inst->operand); 
             zd_string_appendm(&code, "\n\tret");
 
@@ -232,7 +233,7 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
         } break;
 
         case OP_INC: { /* *dp += inst->operand; */
-            struct zd_string code = {0};
+            code.length = 0;
             zd_string_appendm(&code, "\n\tadd BYTE [rdi], %zu", inst->operand & 0xFF); 
             zd_string_appendm(&code, "\n\tret");
 
@@ -244,7 +245,7 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
         } break;
 
         case OP_DEC: { /* *dp -= inst->operand; */
-            struct zd_string code = {0};
+            code.length = 0;
             zd_string_appendm(&code, "\n\tsub BYTE [rdi], %zu", inst->operand & 0xFF); 
             zd_string_appendm(&code, "\n\tret");
 
@@ -256,7 +257,7 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
         } break;
 
         case OP_OUT: { /* for (size_t i = 0; i < inst->operand; i++) fputc(*dp, stdout); */
-            struct zd_string code = {0};
+            code.length = 0;
             zd_string_appendm(&code, "\n\tmov rax, 1");
             zd_string_appendm(&code, "\n\tmov rsi, rdi");
             zd_string_appendm(&code, "\n\tmov rdi, 1");
@@ -273,7 +274,7 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
         } break;
 
         case OP_IN: { /* for (size_t i = 0; i < inst->operand; i++) *dp = fgetc(stdin); */
-            struct zd_string code = {0};
+            code.length = 0;
             zd_string_appendm(&code, "\n\tmov rax, 0");
             zd_string_appendm(&code, "\n\tmov rsi, rdi");
             zd_string_appendm(&code, "\n\tmov rdi, 0");
@@ -287,7 +288,7 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
                 func(dp);
 
             pc++;
-       } break;
+        } break;
 
         case OP_JZ:
             if (*dp == 0) pc = inst->operand;
@@ -304,6 +305,7 @@ static void jit_compile(struct zd_dyna *insts, void *map_addr)
         }
     }
 
+    zd_string_destroy(&code);
     zd_dynb_destroy(&mem);
 }
 

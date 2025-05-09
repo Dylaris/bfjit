@@ -6,6 +6,20 @@ The JIT compiler for Brainfuck is pretty weak because I built it using my own 'd
 
 So, in this project, the interpreter actually runs faster than the JIT :->
 
+## usage
+
+Only for Linux if you want to enable the JIT
+
+```console
+$ lua build.lua
+$ ./bfjit test/helloworld.bf            (interpret)
+
+OR 
+
+$ ./bfjit -jit test/helloworld.bf       (jit)
+
+```
+
 ## syntax
 
 | Brainfuck | C         |
