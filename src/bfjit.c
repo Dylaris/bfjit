@@ -1,11 +1,7 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#define ZD_DS_IMPLEMENTATION
+#define ZD_IMPLEMENTATION
 #define ZD_DS_DYNAMIC_BUFFER
 #define ZD_DS_DYNAMIC_ARRAY
-#include "zd_ds.h"
+#include "zd.h"
 
 // Brainfuck    C
 //     >      ++ptr
@@ -64,12 +60,12 @@ static void generate_IR(struct zd_dyna *insts, struct zd_dyna *addr_stack, char 
     while (*ptr) {
         char c = *(ptr++);
         switch (c) {
-        case OP_SHL:
-        case OP_SHR:
-        case OP_INC:
-        case OP_DEC:
-        case OP_OUT:
-        case OP_IN: {
+        case '<':
+        case '>':
+        case '+':
+        case '-':
+        case '.':
+        case ',': {
             size_t count = 1;
             while (*ptr) {
                 if (c != *ptr) break;
@@ -84,7 +80,7 @@ static void generate_IR(struct zd_dyna *insts, struct zd_dyna *addr_stack, char 
             zd_dyna_append(insts, &inst);
         } break;
 
-        case OP_JZ: {
+        case '[': {
             size_t addr = insts->count;   /* record the address of current instruction '[' */
             struct instruction inst = {
                 .opcode = c,
@@ -95,7 +91,7 @@ static void generate_IR(struct zd_dyna *insts, struct zd_dyna *addr_stack, char 
             zd_dyna_append(addr_stack, &addr);
         } break;
 
-        case OP_JNZ: {
+        case ']': {
             if (addr_stack->count == 0) {
                 fprintf(stderr, "ERROR: unbalanced parentheses\n");
                 exit(1);
@@ -120,7 +116,7 @@ static void generate_IR(struct zd_dyna *insts, struct zd_dyna *addr_stack, char 
     }
 }
 
-static void interpreter(struct zd_dyna *insts)
+static void interpret(struct zd_dyna *insts)
 {
     struct zd_dynb mem = {0};
     zd_dynb_resize(&mem, 1024);
@@ -189,6 +185,10 @@ static void interpreter(struct zd_dyna *insts)
     zd_dynb_destroy(&mem);
 }
 
+static void jit_compile(void)
+{
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -206,7 +206,7 @@ int main(int argc, char **argv)
 
     read_file(program, &code_buf);
     generate_IR(&insts, &addrs, code_buf.base);
-    interpreter(&insts);
+    interpret(&insts);
 
 #if 0
     for (size_t i = 0; i < insts.count; i++) {
