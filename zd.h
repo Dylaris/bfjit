@@ -16,6 +16,7 @@
  * ZD_TEST              Simple testing tool
  * ZD_LOG               Simple logging for information
  * ZD_FILE              Some operations about file
+ * ZD_DYNASM            A simple way to use 'dynasm' (A stupid thing :->)
  * ZD_COMMAND_LINE      Some operations about command line (option, ...)
  * ZD_DS_DYNAMIC_ARRAY  Dynamic array
  * ZD_DS_DYNAMIC_BUFFER Dynamic buffer
@@ -101,6 +102,16 @@ struct zd_string {
     size_t capacity;
 };
 
+#ifndef ZD_IMPLEMENTATION
+#define zd_string_appendm
+#else
+#define zd_string_appendm(p_obj, fmt, ...)                  \
+    do {                                                    \
+        char buf[1024];                                     \
+        snprintf(buf, sizeof(buf), (fmt), ##__VA_ARGS__);   \
+        zd_string_append(p_obj, buf, 0);                    \
+    } while (0)
+#endif
 ZD_DEF void zd_string_append(struct zd_string *str, void *new_str, size_t size);
 ZD_DEF struct zd_string zd_string_sub(struct zd_string *str, size_t src, size_t dest);
 ZD_DEF void zd_string_destroy(void *arg);
@@ -126,8 +137,8 @@ ZD_DEF void zd_stack_destroy(struct zd_stack *stk, void (*clear_item)(void *));
 
 #ifdef ZD_FILE
 
-ZD_DEF int zd_file_load(const char *filename, void **buf);
-ZD_DEF int zd_file_dump(const char *filename, void *buf, size_t size);
+ZD_DEF int zd_file_load(const char *filename, char **buf);
+ZD_DEF int zd_file_dump(const char *filename, char *buf, size_t size);
 
 #endif /* ZD_FILE */
 
@@ -151,6 +162,26 @@ ZD_DEF void zd_cmdl_destroy(void *arg);
 ZD_DEF void zd_cmdlopt_destroy(void *arg);
 
 #endif /* ZD_COMMAND_LINE */
+
+#ifdef ZD_DYNASM
+
+#if defined(__linux__)
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#elif defined(__WIN32)
+#else
+#endif
+
+#define ZD_PAGE_SIZE 4096
+#define ZD_ASSEMBLER "fasm"
+
+ZD_DEF void *zd_dynasm_map(size_t size);
+ZD_DEF void *zd_dynasm_do(char *code, void *addr);
+ZD_DEF void zd_dynasm_free(void *addr);
+
+#endif /* ZD_DYNASM */
 
 #ifdef __cplusplus
 }
@@ -244,20 +275,24 @@ ZD_DEF void zd_cmdlopt_destroy(void *arg)
 
 #define zd_log(type, fmt, ...)                                                  \
     do {                                                                        \
+        char buf[1024];     /* f*ck string concat in C */                       \
         switch ((type)) {                                                       \
         case ZD_LOG_INFO:                                                       \
-            fprintf(stderr, "[" ZD_LOG_COLOR_YELLOW                             \
-                    "INFO" ZD_LOG_COLOR_RESET "] " fmt "\n", ##__VA_ARGS__);    \
+            snprintf(buf, sizeof(buf), "[%sINFO%s] %s\n", ZD_LOG_COLOR_YELLOW,  \
+                    ZD_LOG_COLOR_RESET, (fmt), ##__VA_ARGS__);                  \
+            fprintf(stderr, "%s", buf);                                         \
             break;                                                              \
                                                                                 \
         case ZD_LOG_ERRO:                                                       \
-            fprintf(stderr, "[" ZD_LOG_COLOR_RED                                \
-                    "ERRO" ZD_LOG_COLOR_RESET "] " fmt "\n", ##__VA_ARGS__);    \
+            snprintf(buf, sizeof(buf), "[%sERRO%s] %s\n", ZD_LOG_COLOR_RED,     \
+                    ZD_LOG_COLOR_RESET, (fmt), ##__VA_ARGS__);                  \
+            fprintf(stderr, "%s", buf);                                         \
             break;                                                              \
                                                                                 \
         case ZD_LOG_GOOD:                                                       \
-            fprintf(stderr, "[" ZD_LOG_COLOR_GREEN                              \
-                    "GOOD" ZD_LOG_COLOR_RESET "] " fmt "\n", ##__VA_ARGS__);    \
+            snprintf(buf, sizeof(buf), "[%sGOOD%s] %s\n", ZD_LOG_COLOR_GREEN,   \
+                    ZD_LOG_COLOR_RESET, (fmt), ##__VA_ARGS__);                  \
+            fprintf(stderr, "%s", buf);                                         \
             break;                                                              \
                                                                                 \
         default: break;                                                         \
@@ -266,11 +301,10 @@ ZD_DEF void zd_cmdlopt_destroy(void *arg)
 
 #endif /* ZD_LOG */
 
-
 #ifdef ZD_FILE
 
 /* return -1 if error, the file size if success (buf is NULL means get the file size) */
-ZD_DEF int zd_file_load(const char *filename, void **buf)
+ZD_DEF int zd_file_load(const char *filename, char **buf)
 {
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) return -1;
@@ -306,12 +340,12 @@ ZD_DEF int zd_file_load(const char *filename, void **buf)
 }
 
 /* return -1 if error, the file size if success */
-ZD_DEF int zd_file_dump(const char *filename, void *buf, size_t size)
+ZD_DEF int zd_file_dump(const char *filename, char *buf, size_t size)
 {
     FILE *fp = fopen(filename, "w");
     if (fp == NULL) return -1;
 
-    size_t write_size = fwrite(*buf, 1, size, fp);
+    size_t write_size = fwrite(buf, 1, size, fp);
     if (write_size != size) {
         fclose(fp);
         return -1;
@@ -593,6 +627,90 @@ ZD_DEF void zd_stack_destroy(struct zd_stack *stk, void (*clear_item)(void *))
 }
 
 #endif /* ZD_DS_STACK */
+
+#ifdef ZD_DYNASM
+
+#if defined(__linux__)
+
+ZD_DEF void *zd_dynasm_map(size_t size)
+{
+    if (size == 0) size = ZD_PAGE_SIZE;
+    void *addr = mmap(NULL, size, PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (addr == MAP_FAILED) return NULL;
+    return addr;
+}
+
+ZD_DEF void *zd_dynasm_do(char *code, void *addr)
+{
+    if (code == NULL || addr == NULL) return NULL;
+
+    /* write the code into a asm file */
+
+    char tmp_asm[] = "/tmp/tempfile_XXXXXX";
+
+    int asm_fd = mkstemp(tmp_asm);
+    if (asm_fd < 0) return NULL;
+
+    char buf[ZD_PAGE_SIZE];
+    snprintf(buf, sizeof(buf), "use64\n%s", code);
+    size_t asm_size = strlen(buf);
+
+    if (write(asm_fd, buf, asm_size) != (ssize_t) asm_size) {
+        close(asm_fd);
+        unlink(tmp_asm);
+        return NULL;
+    }
+    close(asm_fd);
+
+    /* use assembler (fasm) to compile asm file, and output binary file */
+
+    char tmp_bin[] = "/tmp/tempfile_XXXXXX";
+
+    int bin_fd = mkstemp(tmp_bin);
+    if (bin_fd < 0) return NULL;
+
+    pid_t pid = fork(); 
+    if (pid == 0) {
+        close(bin_fd);
+
+        /* diable the output from child process */
+        int devnull_fd = open("/dev/null", O_WRONLY);
+        if (devnull_fd < 0) _exit(1);
+
+        dup2(devnull_fd, STDOUT_FILENO);
+        dup2(devnull_fd, STDERR_FILENO);
+        close(devnull_fd);
+
+        execlp(ZD_ASSEMBLER, ZD_ASSEMBLER, tmp_asm, tmp_bin, NULL);
+        _exit(1);
+    }
+    waitpid(pid, NULL, 0);
+
+    unlink(tmp_asm);
+
+    /* load the machine code into an mapped executable page */
+
+    size_t read_size = read(bin_fd, buf, sizeof(buf));
+    if (read_size > ZD_PAGE_SIZE) read_size = ZD_PAGE_SIZE;
+
+    memcpy(addr, buf, read_size);
+
+    close(bin_fd);
+    unlink(tmp_bin);
+
+    return addr;
+}
+
+ZD_DEF void zd_dynasm_free(void *addr)
+{
+    munmap(addr, ZD_PAGE_SIZE);
+}
+
+#elif defined(__WIN32)
+#else
+#endif /* platform */
+
+#endif /* ZD_DYNASM */
 
 #endif /* ZD_IMPLEMENTATION */
 

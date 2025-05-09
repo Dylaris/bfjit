@@ -1,6 +1,9 @@
 #define ZD_IMPLEMENTATION
 #define ZD_DS_DYNAMIC_BUFFER
 #define ZD_DS_DYNAMIC_ARRAY
+#define ZD_DS_STRING
+#define ZD_DYNASM
+#define ZD_COMMAND_LINE
 #include "zd.h"
 
 // Brainfuck    C
@@ -185,28 +188,169 @@ static void interpret(struct zd_dyna *insts)
     zd_dynb_destroy(&mem);
 }
 
-static void jit_compile(void)
+static void jit_compile(struct zd_dyna *insts, void *map_addr)
 {
+    struct zd_dynb mem = {0};
+    zd_dynb_resize(&mem, 1024);
+    memset(mem.base, 0, mem.capacity);
+    char *dp = mem.base;    /* data pointer */
+    size_t pc = 0;          /* program counter */
+     
+    while (pc < insts->count) {
+        struct instruction *inst = (struct instruction *) zd_dyna_get(insts, pc);
+        switch (inst->opcode) {
+        case OP_SHL: { /* dp -= inst->operand; */
+            struct zd_string code = {0};
+            zd_string_appendm(&code, "\n\tsub QWORD [rdi], %zu", inst->operand); 
+            zd_string_appendm(&code, "\n\tret");
+
+            zd_dynasm_do(code.buf, map_addr);
+            void (*func)(char **) = (void (*)(char **)) map_addr;
+            func(&dp);
+
+            if (dp < mem.base) { 
+                fprintf(stderr, "ERROR: memory underflow\n"); 
+                exit(1); 
+            }
+            pc++;
+        } break;
+
+        case OP_SHR: { /* dp += inst->operand; */
+            struct zd_string code = {0};
+            zd_string_appendm(&code, "\n\tadd QWORD [rdi], %zu", inst->operand); 
+            zd_string_appendm(&code, "\n\tret");
+
+            zd_dynasm_do(code.buf, map_addr);
+            void (*func)(char **) = (void (*)(char **)) map_addr;
+            func(&dp);
+
+            if (dp >= mem.base + mem.capacity) {
+                fprintf(stderr, "ERROR: memory overflow\n");
+                exit(1);
+            }
+            pc++;
+        } break;
+
+        case OP_INC: { /* *dp += inst->operand; */
+            struct zd_string code = {0};
+            zd_string_appendm(&code, "\n\tadd BYTE [rdi], %zu", inst->operand & 0xFF); 
+            zd_string_appendm(&code, "\n\tret");
+
+            zd_dynasm_do(code.buf, map_addr);
+            void (*func)(char *) = (void (*)(char *)) map_addr;
+            func(dp);
+
+            pc++;
+        } break;
+
+        case OP_DEC: { /* *dp -= inst->operand; */
+            struct zd_string code = {0};
+            zd_string_appendm(&code, "\n\tsub BYTE [rdi], %zu", inst->operand & 0xFF); 
+            zd_string_appendm(&code, "\n\tret");
+
+            zd_dynasm_do(code.buf, map_addr);
+            void (*func)(char *) = (void (*)(char *)) map_addr;
+            func(dp);
+
+            pc++;
+        } break;
+
+        case OP_OUT: { /* for (size_t i = 0; i < inst->operand; i++) fputc(*dp, stdout); */
+            struct zd_string code = {0};
+            zd_string_appendm(&code, "\n\tmov rax, 1");
+            zd_string_appendm(&code, "\n\tmov rsi, rdi");
+            zd_string_appendm(&code, "\n\tmov rdi, 1");
+            zd_string_appendm(&code, "\n\tmov rdx, 1");
+            zd_string_appendm(&code, "\n\tsyscall");
+            zd_string_appendm(&code, "\n\tret");
+
+            zd_dynasm_do(code.buf, map_addr);
+            void (*func)(char *) = (void (*)(char *)) map_addr;
+            for (size_t i = 0; i < inst->operand; i++)
+                func(dp);
+
+            pc++;
+        } break;
+
+        case OP_IN: { /* for (size_t i = 0; i < inst->operand; i++) *dp = fgetc(stdin); */
+            struct zd_string code = {0};
+            zd_string_appendm(&code, "\n\tmov rax, 0");
+            zd_string_appendm(&code, "\n\tmov rsi, rdi");
+            zd_string_appendm(&code, "\n\tmov rdi, 0");
+            zd_string_appendm(&code, "\n\tmov rdx, 1");
+            zd_string_appendm(&code, "\n\tsyscall");
+            zd_string_appendm(&code, "\n\tret");
+
+            zd_dynasm_do(code.buf, map_addr);
+            void (*func)(char *) = (void (*)(char *)) map_addr;
+            for (size_t i = 0; i < inst->operand; i++)
+                func(dp);
+
+            pc++;
+       } break;
+
+        case OP_JZ:
+            if (*dp == 0) pc = inst->operand;
+            else          pc++;
+            break;
+
+        case OP_JNZ:
+            if (*dp != 0) pc = inst->operand;
+            else          pc++;
+            break;
+
+        default: 
+            break;
+        }
+    }
+
+    zd_dynb_destroy(&mem);
 }
 
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "Usage: ./bfjit <FILE>\n"); 
+        fprintf(stderr, "Usage: ./bfjit [-jit] <FILE>\n"
+                        "option:\n"
+                        "  -jit  enable jit compilation\n");
+        return 1;
+    }
+
+    struct zd_cmdl cmdl = {0};
+    zd_cmdl_build(&cmdl, argc, argv);
+
+    int is_jit = 0;
+    struct zd_dyna optvals = zd_cmdl_getopt(&cmdl, "-jit", &is_jit);
+
+    char *program = NULL;
+    if (is_jit == 0) {
+        struct zd_string *p_string = (struct zd_string *) zd_dyna_get(&cmdl.nopts, 0);
+        program = p_string->buf;
+    } else {
+        struct zd_string *p_string = (struct zd_string *) zd_dyna_get(&optvals, 0);
+        program = p_string->buf;
+    }
+
+    void *map_addr = zd_dynasm_map(0);
+    if (map_addr == NULL) { 
+        fprintf(stderr, "ERROR: map error\n"); 
         return 1;
     }
 
     struct zd_dynb code_buf = {0};
     struct zd_dyna insts = {0};
     struct zd_dyna addrs = {0};
-    const char *program = argv[1];
 
     zd_dyna_init(&insts, sizeof(struct instruction));
     zd_dyna_init(&addrs, sizeof(size_t));
 
     read_file(program, &code_buf);
     generate_IR(&insts, &addrs, code_buf.base);
-    interpret(&insts);
+
+    if (is_jit == 0)
+        interpret(&insts);
+    else
+        jit_compile(&insts, map_addr);
 
 #if 0
     for (size_t i = 0; i < insts.count; i++) {
@@ -215,9 +359,11 @@ int main(int argc, char **argv)
     }
 #endif
 
+    zd_dynasm_free(map_addr);
     zd_dyna_destroy(&addrs, NULL);
     zd_dynb_destroy(&code_buf);
     zd_dyna_destroy(&insts, NULL);
+    zd_cmdl_destroy(&cmdl);
 
     return 0;
 }

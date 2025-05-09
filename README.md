@@ -1,18 +1,24 @@
 # bfjit
 
-## Syntax
+## brief
+
+The JIT compiler for Brainfuck is pretty weak because I built it using my own 'dynasm' method, which is a cool trick (I think so) but really slow. 
+
+So, in this project, the interpreter actually runs faster than the JIT :->
+
+## syntax
 
 | Brainfuck | C         |
 |:---------:|:---------:|
-| >         | ptr++     |
-| <         | ptr--     |
-| +         | *ptr++    |
-| -         | *ptr--    |
+| >         | ++ptr     |
+| <         | --ptr     |
+| +         | ++*ptr    |
+| -         | --*ptr    |
 | .         | fputc(*ptr, stdout) |
 | ,         | *ptr=fgetc(stdin)   |
 | [         | while(*ptr) {       |
 | ]         | }                   |
 
-## Reference
+## reference
 - [A nice blog for learning brainfuck](https://blog.csdn.net/nameofcsdn/article/details/110231730)
 - [Thans to tsoding for the video](https://www.youtube.com/watch?v=mbFY3Rwv7XM)

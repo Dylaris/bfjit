@@ -4,7 +4,7 @@ local tool  = luabc.tool
 
 local CC     = "gcc"
 local CFLAGS = { "-Wall", "-Wextra", "-I./" }
-local CSTD   = "-std=c11"
+local CSTD   = "-std=gnu11"
 local TARGET = "bfjit"
 local SRC    = tool.match_file_extension(".c", "src")
 local CLEAR  = TARGET
